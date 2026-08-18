@@ -29,7 +29,8 @@ fi
 
 # Only service account keys can manage pool worker capacity, so a successful
 # fleet-management call is a reliable way to reject the wrong key type before it
-# reaches the workers, where the failure is much harder to read.
+# reaches the workers, where the failure is much harder to read. Machine mode
+# expects a personal user key, which this endpoint rejects by design.
 if [[ "${SKIP_VERIFY:-0}" != "1" ]] && command -v curl >/dev/null 2>&1; then
   status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
     --url "https://api.cursor.com/v0/private-workers/summary" \
@@ -37,10 +38,14 @@ if [[ "${SKIP_VERIFY:-0}" != "1" ]] && command -v curl >/dev/null 2>&1; then
 
   case "$status" in
   200)
-    echo "Verified: the key can manage pool worker capacity."
+    echo "Verified: the key can manage pool worker capacity, so it works in either worker mode."
     ;;
   401 | 403)
-    die "Cursor rejected the key for pool fleet management (HTTP ${status}). Pool workers need a service account key from Dashboard > Settings > API Keys > Service Accounts; user, personal, team, and organization keys are rejected. Set SKIP_VERIFY=1 to store it anyway."
+    if [[ "$(worker_mode)" == "machine" ]]; then
+      echo "Note: this is not a service account key, which is expected for worker_mode = \"machine\"."
+    else
+      die "Cursor rejected the key for pool fleet management (HTTP ${status}). Pool workers need a service account key from Dashboard > Settings > API Keys > Service Accounts, on an Enterprise plan; user, personal, team, and organization keys are rejected. Either use a service account key, or set worker_mode = \"machine\" to run My Machines workers with this key. Set SKIP_VERIFY=1 to store it anyway."
+    fi
     ;;
   000)
     echo "warning: could not reach api.cursor.com to verify the key; storing it unverified" >&2

@@ -35,6 +35,8 @@ locals {
       CURSOR_GCP_PROJECT_ID              = var.project_id
       CURSOR_API_KEY_SECRET_ID           = var.cursor_api_key_secret_id
       CURSOR_GIT_CREDENTIALS_SECRET_ID   = var.git_credentials_secret_id
+      CURSOR_WORKER_MODE                 = var.worker_mode
+      CURSOR_WORKER_NAME                 = var.worker_name
       CURSOR_WORKER_POOL_NAME            = var.worker_pool_name
       CURSOR_WORKER_IDLE_RELEASE_TIMEOUT = tostring(var.worker_idle_release_timeout)
       CURSOR_WORKER_LABELS_FILE          = "/etc/cursor/labels.json"

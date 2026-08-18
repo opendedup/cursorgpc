@@ -6,6 +6,11 @@ region       = "us-central1"
 machine_type = "e2-standard-16"
 worker_count = 1
 
+# "pool" needs a Cursor Enterprise plan and a service account API key. Switch to
+# "machine" to run My Machines workers with a personal user API key instead;
+# sessions then target a worker by name rather than by pool.
+worker_mode = "pool"
+
 # Cursor pool workers register with. Target it from a trigger with `pool=gce-us-central1`.
 worker_pool_name = "gce-us-central1"
 

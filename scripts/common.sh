@@ -34,6 +34,7 @@ project_id() { printf '%s' "${PROJECT_ID:-$(tf_output project_id lennyisagoodboy
 region() { printf '%s' "${REGION:-$(tf_output region us-central1)}"; }
 mig_name() { printf '%s' "${MIG_NAME:-$(tf_output instance_group_manager cursor-worker-mig)}"; }
 secret_id() { printf '%s' "${SECRET_ID:-$(tf_output api_key_secret_id cursor-worker-api-key)}"; }
+worker_mode() { printf '%s' "${WORKER_MODE:-$(tf_output worker_mode pool)}"; }
 
 # Name of the first RUNNING instance in the managed instance group.
 first_instance() {

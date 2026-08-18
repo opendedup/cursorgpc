@@ -20,6 +20,7 @@ REPOS_FILE="${CURSOR_WORKER_REPOS_FILE:-/etc/cursor/repos.json}"
 LABELS_FILE="${CURSOR_WORKER_LABELS_FILE:-/etc/cursor/labels.json}"
 POOL_NAME="${CURSOR_WORKER_POOL_NAME:-default}"
 IDLE_TIMEOUT="${CURSOR_WORKER_IDLE_RELEASE_TIMEOUT:-600}"
+WORKER_MODE="${CURSOR_WORKER_MODE:-pool}"
 
 log() { echo "cursor-worker-run: $*"; }
 
@@ -54,7 +55,6 @@ fi
 # Non-fatal: a stale checkout is better than a worker that never connects.
 cursor-worker-prepare || log "WARNING workspace preparation reported errors"
 
-# Pool workers require a service account API key; other key types are rejected.
 if ! CURSOR_API_KEY="$(cursor-worker-secret "$CURSOR_API_KEY_SECRET_ID")"; then
   log "could not read the Cursor API key from secret ${CURSOR_API_KEY_SECRET_ID}"
   exit 1
@@ -71,7 +71,19 @@ else
 fi
 
 # Worker options must come before the start subcommand.
-args=(worker --pool "$POOL_NAME")
+#
+# --pool needs a service account API key, which is Enterprise-only. Machine mode
+# omits it and accepts a personal user key, at the cost of pool routing: sessions
+# target the worker by name instead.
+args=(worker)
+
+if [[ "$WORKER_MODE" == "pool" ]]; then
+  args+=(--pool "$POOL_NAME")
+fi
+
+if [[ -n "${CURSOR_WORKER_NAME:-}" ]]; then
+  args+=(--name "$CURSOR_WORKER_NAME")
+fi
 
 for dir in "${worker_dirs[@]}"; do
   mkdir -p "$dir"
@@ -94,5 +106,10 @@ if [[ "${CURSOR_WORKER_VERBOSE:-0}" == "1" ]]; then
   args+=(--verbose)
 fi
 
-log "starting worker in pool ${POOL_NAME} with roots: ${worker_dirs[*]}"
+if [[ "$WORKER_MODE" == "pool" ]]; then
+  log "starting pool worker in ${POOL_NAME} with roots: ${worker_dirs[*]}"
+else
+  log "starting machine worker with roots: ${worker_dirs[*]}"
+fi
+
 exec "$AGENT_BIN" "${args[@]}"

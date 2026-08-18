@@ -47,10 +47,23 @@ Notable design choices:
 - **Autohealing probes `/healthz`, never `/readyz`.** `/healthz` tracks the connection to Cursor and stays healthy during a session; `/readyz` deliberately returns 503 while a session holds the worker, so probing it would kill busy workers.
 - **Workspaces are refreshed before every session.** When `--idle-release-timeout` fires, the CLI exits 0, systemd restarts it, and the workspace is re-fetched and hard-reset first. Untracked build caches survive by default (`worker_reset_mode = "reset"`).
 
+## Two worker modes
+
+The GCP side is identical either way; only the CLI flags and how you target a session differ.
+
+| | `worker_mode = "pool"` (default) | `worker_mode = "machine"` |
+| --- | --- | --- |
+| Cursor plan | Enterprise | Any |
+| Key type | Service account API key | Personal user API key |
+| Targeted by | `pool=<name>` | `worker=<name>` or `machine=<name>` |
+| Assignment | One session claims one worker | Shared assignment allowed |
+| Built for | An org-managed fleet | One or a few named machines |
+
+Pool mode is the right end state for a shared fleet. If `agent worker --pool` fails with *"Pool workers (--pool) require a service account API key"*, you do not have an Enterprise service account key, and `worker_mode = "machine"` gets the same VM working with the key you already have. See [My Machines](https://cursor.com/docs/cloud-agent/self-hosted-guides/my-machines.md).
+
 ## Prerequisites
 
-- A **Cursor Enterprise plan**. Pool workers are Enterprise-only.
-- A **service account API key** from Dashboard → Settings → API Keys → Service Accounts. It is shown once. User, personal, team, and organization keys are rejected by pool workers.
+- For pool mode, a **Cursor Enterprise plan** and a **service account API key** from Dashboard → Settings → API Keys → Service Accounts. It is shown once. User, personal, team, and organization keys are rejected by pool workers. For machine mode, a user API key from [Dashboard → API Keys](https://cursor.com/dashboard/api) is enough.
 - Self-hosted routing enabled in the [Cloud Agents dashboard](https://cursor.com/dashboard/cloud-agents#self-hosted-agents): **Allow Self-Hosted Agents**, or **Require Self-Hosted Agents** to route everything to your fleet.
 - `gcloud` and Terraform >= 1.5 locally, authenticated with `gcloud auth application-default login`.
 - On the GCP project: `roles/owner`, or the combination of `compute.admin`, `iam.serviceAccountAdmin`, `secretmanager.admin`, `resourcemanager.projectIamAdmin`, and `serviceusage.serviceUsageAdmin`.
@@ -94,7 +107,9 @@ It then appears in the [Cloud Agents dashboard](https://cursor.com/dashboard/clo
 
 ## Sending agents to the fleet
 
-Pick the pool in the worker selector in the dashboard, or target it from a trigger:
+With `worker_mode = "machine"`, target a worker by name: `@cursoragent worker=<name>` on GitHub, or the equivalent `worker=` / `machine=` hint on other surfaces. The name defaults to the instance hostname, or set `worker_name`.
+
+In pool mode, pick the pool in the worker selector in the dashboard, or target it from a trigger:
 
 | Surface | Syntax |
 | --- | --- |
@@ -130,7 +145,8 @@ Full reference in [`terraform/variables.tf`](terraform/variables.tf). The variab
 | `region` | `us-central1` | Target region |
 | `machine_type` | `e2-standard-16` | 16 vCPU / 64 GB per worker |
 | `worker_count` | `1` | Fleet size; one session claims one worker |
-| `worker_pool_name` | `default` | Pool name used by triggers |
+| `worker_mode` | `pool` | `pool` needs an Enterprise service account key; `machine` runs My Machines workers with a user key |
+| `worker_pool_name` | `default` | Pool name used by triggers, in pool mode |
 | `worker_repos` | `[]` | Repos cloned onto each worker; first is primary. Empty means a repo-less pool |
 | `worker_labels` | `{}` | Routing labels. `repo` and `pool` are reserved by Cursor |
 | `worker_idle_release_timeout` | `600` | Seconds to hold the worker after a session, for follow-ups |

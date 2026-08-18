@@ -53,6 +53,11 @@ output "subnetwork" {
   value       = local.subnetwork_name
 }
 
+output "worker_mode" {
+  description = "Whether workers register for pool assignment or as My Machines workers."
+  value       = var.worker_mode
+}
+
 output "cursor_pool_name" {
   description = "Cursor pool name workers register with. Target it from a trigger with pool=<name>."
   value       = var.worker_pool_name

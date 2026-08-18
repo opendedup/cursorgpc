@@ -174,10 +174,27 @@ variable "git_credentials_secret_id" {
   default     = ""
 }
 
+variable "worker_mode" {
+  description = "\"pool\" registers workers for org-wide pool assignment and requires a Cursor Enterprise plan plus a service account API key. \"machine\" runs My Machines workers, which accept a personal user API key and are targeted by name instead of by pool."
+  type        = string
+  default     = "pool"
+
+  validation {
+    condition     = contains(["pool", "machine"], var.worker_mode)
+    error_message = "worker_mode must be either pool or machine."
+  }
+}
+
 variable "worker_pool_name" {
-  description = "Cursor pool name workers register with. Sessions route only to workers in the pool they target."
+  description = "Cursor pool name workers register with. Sessions route only to workers in the pool they target. Ignored when worker_mode is \"machine\"."
   type        = string
   default     = "default"
+}
+
+variable "worker_name" {
+  description = "Display name reported to Cursor. Empty uses the instance hostname, which keeps names unique across the fleet. Mainly useful with worker_mode = \"machine\", where triggers target a worker by name."
+  type        = string
+  default     = ""
 }
 
 variable "worker_idle_release_timeout" {

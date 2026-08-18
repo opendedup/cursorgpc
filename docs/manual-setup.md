@@ -56,6 +56,30 @@ personal, team, or organization key: fine for `agent login` / My Machines and fo
 `agent -p` in CI, but pool workers will reject it. `scripts/set-api-key.sh` runs
 this check before storing anything.
 
+The rejection you get from the worker itself looks like this, and is not
+something a flag or a retry will fix:
+
+```text
+Error: Pool workers (--pool) require a service account API key.
+```
+
+The fix is either a service account key, or dropping `--pool` to run the same VM
+as a My Machines worker:
+
+```bash
+export CURSOR_API_KEY=<your user api key>     # or: agent login
+
+agent worker \
+  --name gce-us-central1-1 \
+  --worker-dir ~/git \
+  --management-addr 0.0.0.0:8080 \
+  start --verbose
+```
+
+Target that worker with `worker=gce-us-central1-1` (or `machine=`) from GitHub,
+Slack, or the dashboard's worker selector, instead of `pool=`. Everything else on
+this page is unchanged. In Terraform this is `worker_mode = "machine"`.
+
 Wherever the key ends up, keep it out of shell history and out of git. Use
 `read -r -s` to enter it, or pipe it straight from a secret store.
 
