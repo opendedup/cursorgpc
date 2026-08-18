@@ -198,6 +198,33 @@ github_token_secret_id = "cursor-worker-github-token"
 
 The worker exports it as `GH_TOKEN` and `GITHUB_TOKEN` at each start, and derives the HTTPS git credential from the same token when `git_credentials_secret_id` is unset — so one secret covers both `gh` and private clones. Like the Cursor key, it is read at startup and never written to disk.
 
+#### Token permissions
+
+For a fine-grained personal access token, scope **Repository access** to just the repos in `worker_repos` rather than "All repositories", then add these **Repository** permissions:
+
+| Permission | Level | Needed for |
+| --- | --- | --- |
+| Metadata | Read | Mandatory; GitHub selects it as soon as you add any repository permission |
+| Contents | Read and write | Cloning and fetching the workspace, and pushing the agent's branches |
+| Pull requests | Read and write | Opening and updating PRs, reading and posting review comments |
+
+Add these only if you want the corresponding behavior:
+
+| Permission | Level | Needed for |
+| --- | --- | --- |
+| Issues | Read and write | Agents triggered from issues, or commenting on them |
+| Actions | Read | `gh run list` / `gh run view --log`, so an agent can read its own CI failures |
+| Checks | Read | Check run results on a PR |
+| Commit statuses | Read | Status-based CI reporting |
+| Workflows | Read and write | **Required to push any change under `.github/workflows/`.** Without it GitHub rejects the push, and the failure names the workflow file rather than the permission |
+
+No **Account** permissions are needed. Two things that commonly block this:
+
+- If the repo belongs to an organization, an owner may have to allow fine-grained tokens and approve yours, under Organization settings → Personal access tokens. A pending approval looks like a permissions error.
+- Fine-grained tokens expire. Rotate with `gcloud secrets versions add` on the same secret, then `make restart` — no Terraform run and no VM replacement.
+
+A GitHub App installation token is the better long-term answer for a shared fleet, since it is not tied to one person's account and its tokens are short-lived. A fine-grained PAT is fine to start with.
+
 Anything else your builds need belongs in `extra_apt_packages` or `extra_setup_script`, which runs as root at the end of the bootstrap and must be idempotent:
 
 ```hcl
