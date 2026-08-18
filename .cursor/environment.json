@@ -1,0 +1,4 @@
+{
+  "name": "cursorgpc",
+  "install": "bash .cursor/install.sh"
+}
