@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Start the Cursor self-hosted Cloud Agent worker.
+#
+# systemd entrypoint: refreshes the workspace, reads the service account API key
+# from Secret Manager into the process environment only, then execs the CLI. The
+# CLI exits 0 once the idle release timeout fires, and systemd restarts it, which
+# gives every session a freshly prepared workspace.
+set -euo pipefail
+
+CONFIG_FILE="${CURSOR_WORKER_CONFIG_FILE:-/etc/cursor/worker.env}"
+if [[ -r "$CONFIG_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$CONFIG_FILE"
+  set +a
+fi
+
+WORKSPACE_ROOT="${CURSOR_WORKER_WORKSPACE_ROOT:-${HOME}/workspace}"
+REPOS_FILE="${CURSOR_WORKER_REPOS_FILE:-/etc/cursor/repos.json}"
+LABELS_FILE="${CURSOR_WORKER_LABELS_FILE:-/etc/cursor/labels.json}"
+POOL_NAME="${CURSOR_WORKER_POOL_NAME:-default}"
+IDLE_TIMEOUT="${CURSOR_WORKER_IDLE_RELEASE_TIMEOUT:-600}"
+WORKER_MODE="${CURSOR_WORKER_MODE:-pool}"
+
+log() { echo "cursor-worker-run: $*"; }
+
+resolve_agent() {
+  local candidate
+
+  if candidate="$(command -v agent 2>/dev/null)"; then
+    printf '%s' "$candidate"
+    return 0
+  fi
+
+  for candidate in "${HOME}/.local/bin/agent" "${HOME}/.cursor/bin/agent" /usr/local/bin/agent; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+if ! AGENT_BIN="$(resolve_agent)"; then
+  log "the Cursor CLI is not installed; re-run the instance bootstrap"
+  exit 1
+fi
+
+if [[ -z "${CURSOR_API_KEY_SECRET_ID:-}" ]]; then
+  log "CURSOR_API_KEY_SECRET_ID is not set in ${CONFIG_FILE}"
+  exit 1
+fi
+
+# Non-fatal: a stale checkout is better than a worker that never connects.
+cursor-worker-prepare || log "WARNING workspace preparation reported errors"
+
+if ! CURSOR_API_KEY="$(cursor-worker-secret "$CURSOR_API_KEY_SECRET_ID")"; then
+  log "could not read the Cursor API key from secret ${CURSOR_API_KEY_SECRET_ID}"
+  exit 1
+fi
+export CURSOR_API_KEY
+
+# gh reads GH_TOKEN, and many tools still expect GITHUB_TOKEN.
+if [[ -n "${CURSOR_GITHUB_TOKEN_SECRET_ID:-}" ]]; then
+  if GH_TOKEN="$(cursor-worker-secret "$CURSOR_GITHUB_TOKEN_SECRET_ID")"; then
+    GITHUB_TOKEN="$GH_TOKEN"
+    export GH_TOKEN GITHUB_TOKEN
+  else
+    log "WARNING could not read GitHub token secret ${CURSOR_GITHUB_TOKEN_SECRET_ID}; gh will be unauthenticated"
+  fi
+fi
+
+worker_dirs=()
+if [[ -r "$REPOS_FILE" ]] && [[ "$(jq 'length' "$REPOS_FILE")" -gt 0 ]]; then
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && worker_dirs+=("${WORKSPACE_ROOT}/${name}")
+  done < <(jq -r '.[].name' "$REPOS_FILE")
+else
+  worker_dirs+=("${WORKSPACE_ROOT}/default")
+fi
+
+# Worker options must come before the start subcommand.
+#
+# --pool needs a service account API key, which is Enterprise-only. Machine mode
+# omits it and accepts a personal user key, at the cost of pool routing: sessions
+# target the worker by name instead.
+args=(worker)
+
+if [[ "$WORKER_MODE" == "pool" ]]; then
+  args+=(--pool "$POOL_NAME")
+fi
+
+if [[ -n "${CURSOR_WORKER_NAME:-}" ]]; then
+  args+=(--name "$CURSOR_WORKER_NAME")
+fi
+
+for dir in "${worker_dirs[@]}"; do
+  mkdir -p "$dir"
+  args+=(--worker-dir "$dir")
+done
+
+args+=(--idle-release-timeout "$IDLE_TIMEOUT")
+
+if [[ -r "$LABELS_FILE" ]]; then
+  args+=(--labels-file "$LABELS_FILE")
+fi
+
+if [[ -n "${CURSOR_WORKER_MANAGEMENT_ADDR:-}" ]]; then
+  args+=(--management-addr "$CURSOR_WORKER_MANAGEMENT_ADDR")
+fi
+
+args+=(start)
+
+if [[ "${CURSOR_WORKER_VERBOSE:-0}" == "1" ]]; then
+  args+=(--verbose)
+fi
+
+if [[ "$WORKER_MODE" == "pool" ]]; then
+  log "starting pool worker in ${POOL_NAME} with roots: ${worker_dirs[*]}"
+else
+  log "starting machine worker with roots: ${worker_dirs[*]}"
+fi
+
+exec "$AGENT_BIN" "${args[@]}"

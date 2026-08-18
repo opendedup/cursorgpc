@@ -1,0 +1,56 @@
+# Copy to terraform.tfvars and adjust. Never put the Cursor API key here: it goes
+# into Secret Manager via `make api-key` or scripts/set-api-key.sh.
+
+project_id   = "lennyisagoodboy"
+region       = "us-central1"
+machine_type = "e2-standard-16"
+worker_count = 1
+
+# "pool" needs a Cursor Enterprise plan and a service account API key. Switch to
+# "machine" to run My Machines workers with a personal user API key instead;
+# sessions then target a worker by name rather than by pool.
+worker_mode = "pool"
+
+# Cursor pool workers register with. Target it from a trigger with `pool=gce-us-central1`.
+worker_pool_name = "gce-us-central1"
+
+# Repositories cloned onto every worker. The first entry is the primary repo used
+# for assignment identity and dashboard display. Leave empty for a repo-less pool.
+worker_repos = [
+  # { url = "https://github.com/your-org/your-repo.git" },
+  # { url = "https://github.com/your-org/infra.git", name = "infra", branch = "main" },
+]
+
+# Routing labels. `repo` and `pool` are reserved by Cursor.
+worker_labels = {
+  provider = "gcp"
+  region   = "us-central1"
+  env      = "production"
+}
+
+# Secret holding a GitHub token. Exported to the worker as GH_TOKEN and
+# GITHUB_TOKEN so `gh` is authenticated, and reused as the HTTPS git credential
+# for private clones. Recommended over git_credentials_secret_id: one secret,
+# both uses.
+# github_token_secret_id = "cursor-worker-github-token"
+
+# Alternative to the above when you want to supply the raw credential line, such
+# as `https://x-access-token:ghp_xxx@github.com`. Takes precedence over
+# github_token_secret_id for git, which then only authenticates `gh`.
+# git_credentials_secret_id = "cursor-worker-git-credentials"
+
+# Pin Poetry for reproducible builds. Empty installs the latest release.
+# poetry_version = "2.1.3"
+
+# Pin zones if the machine type is not offered in every zone of the region.
+# zones = ["us-central1-a", "us-central1-b", "us-central1-c"]
+
+# Grant yourself IAP SSH access to the workers.
+# iap_ssh_members = ["user:you@example.com"]
+
+# Extra tooling for your repo's builds and tests.
+# extra_apt_packages = ["python3-venv", "postgresql-client"]
+# extra_setup_script = <<-EOT
+#   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+#   apt-get install -y nodejs
+# EOT

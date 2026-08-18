@@ -1,0 +1,38 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Check formatting
+        run: terraform -chdir=terraform fmt -check -recursive
+
+      - name: Validate configuration
+        run: |
+          terraform -chdir=terraform init -backend=false
+          terraform -chdir=terraform validate
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check scripts
+        run: |
+          for file in terraform/files/* scripts/*.sh; do
+            bash -n "$file"
+          done
+
+      - name: Run shellcheck
+        run: shellcheck terraform/files/* scripts/*.sh
