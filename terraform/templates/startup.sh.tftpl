@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+# Bootstrap a Cursor self-hosted Cloud Agent worker.
+#
+# Rendered by Terraform and delivered as a GCE startup script, so it runs as root
+# on every boot and must stay idempotent.
+set -euo pipefail
+
+exec > >(tee -a /var/log/cursor-worker-bootstrap.log | logger -t cursor-worker-bootstrap) 2>&1
+
+echo "=== Cursor worker bootstrap starting at $(date -Is) ==="
+
+WORKER_USER="${worker_user}"
+WORKSPACE_ROOT="${workspace_root}"
+export DEBIAN_FRONTEND=noninteractive
+
+# Boot-time apt runs race unattended-upgrades and mirror hiccups, so retry.
+apt_retry() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if apt-get "$@"; then
+      return 0
+    fi
+    echo "apt-get $* failed (attempt $attempt/5); retrying"
+    sleep $((attempt * 10))
+  done
+  return 1
+}
+
+retry() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if "$@"; then
+      return 0
+    fi
+    echo "$* failed (attempt $attempt/5); retrying"
+    sleep $((attempt * 10))
+  done
+  return 1
+}
+
+echo "--- Installing base packages"
+apt_retry update
+apt_retry install -y --no-install-recommends \
+  bash \
+  build-essential \
+  ca-certificates \
+  curl \
+  git \
+  gnupg \
+  jq \
+  less \
+  openssh-client \
+  python3 \
+  rsync \
+  tmux \
+  unzip ${extra_apt_packages}
+
+%{ if install_docker ~}
+echo "--- Installing Docker Engine"
+if ! command -v docker >/dev/null 2>&1; then
+  install -m 0755 -d /etc/apt/keyrings
+  retry curl -fsSL -o /tmp/docker.gpg https://download.docker.com/linux/ubuntu/gpg
+  gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg /tmp/docker.gpg
+  chmod a+r /etc/apt/keyrings/docker.gpg
+  rm -f /tmp/docker.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    >/etc/apt/sources.list.d/docker.list
+  apt_retry update
+  apt_retry install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+fi
+systemctl enable --now docker
+%{ endif ~}
+
+echo "--- Creating worker user $WORKER_USER"
+if ! id -u "$WORKER_USER" >/dev/null 2>&1; then
+  useradd --create-home --shell /bin/bash "$WORKER_USER"
+fi
+%{ if install_docker ~}
+usermod -aG docker "$WORKER_USER"
+%{ endif ~}
+install -d -o "$WORKER_USER" -g "$WORKER_USER" -m 0755 "$WORKSPACE_ROOT"
+
+echo "--- Writing worker configuration"
+install -d -m 0755 /etc/cursor
+
+cat >/etc/cursor/worker.env <<'WORKER_ENV_EOF'
+${worker_env_file}
+WORKER_ENV_EOF
+chown "root:$WORKER_USER" /etc/cursor/worker.env
+chmod 0640 /etc/cursor/worker.env
+
+cat >/etc/cursor/labels.json <<'LABELS_EOF'
+${labels_json}
+LABELS_EOF
+chmod 0644 /etc/cursor/labels.json
+
+cat >/etc/cursor/repos.json <<'REPOS_EOF'
+${repos_json}
+REPOS_EOF
+chmod 0644 /etc/cursor/repos.json
+
+echo "--- Installing worker helper scripts"
+install_helper() {
+  local path="$1" encoded="$2"
+  printf '%s' "$encoded" | base64 --decode >"$path"
+  chmod 0755 "$path"
+}
+install_helper /usr/local/bin/cursor-worker-secret '${secret_script_b64}'
+install_helper /usr/local/bin/cursor-worker-prepare '${prepare_script_b64}'
+install_helper /usr/local/bin/cursor-worker-run '${run_script_b64}'
+
+echo "--- Installing the Cursor CLI"
+if ! sudo -u "$WORKER_USER" -H test -x "/home/$WORKER_USER/.local/bin/agent" &&
+  ! sudo -u "$WORKER_USER" -H test -x "/home/$WORKER_USER/.cursor/bin/agent"; then
+  retry sudo -u "$WORKER_USER" -H bash -lc 'curl https://cursor.com/install -fsS | bash'
+fi
+sudo -u "$WORKER_USER" -H bash -lc \
+  'PATH="$HOME/.local/bin:$HOME/.cursor/bin:$PATH"; agent --version' ||
+  echo "WARNING could not report the Cursor CLI version"
+
+%{ if install_ops_agent ~}
+echo "--- Installing the Google Cloud Ops Agent"
+if ! systemctl list-unit-files | grep -q '^google-cloud-ops-agent'; then
+  retry curl -fsSL -o /tmp/add-ops-agent-repo.sh https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh
+  retry bash /tmp/add-ops-agent-repo.sh --also-install
+  rm -f /tmp/add-ops-agent-repo.sh
+fi
+%{ endif ~}
+
+%{ if enable_prometheus_metrics ~}
+echo "--- Configuring Ops Agent metrics for the worker endpoint"
+install -d -m 0755 /etc/google-cloud-ops-agent
+cat >/etc/google-cloud-ops-agent/config.yaml <<'OPS_AGENT_EOF'
+metrics:
+  receivers:
+    cursor_worker:
+      type: prometheus
+      config:
+        scrape_configs:
+          - job_name: cursor_worker
+            scrape_interval: 30s
+            static_configs:
+              - targets: ['localhost:${management_port}']
+  service:
+    pipelines:
+      cursor_worker:
+        receivers:
+          - cursor_worker
+OPS_AGENT_EOF
+systemctl restart google-cloud-ops-agent || echo "WARNING could not restart the Ops Agent"
+%{ endif ~}
+
+echo "--- Installing the cursor-worker service"
+cat >/etc/systemd/system/cursor-worker.service <<SERVICE_EOF
+[Unit]
+Description=Cursor self-hosted Cloud Agent worker
+Documentation=https://cursor.com/docs/cloud-agent/self-hosted-guides/pool
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+User=$WORKER_USER
+Group=$WORKER_USER
+WorkingDirectory=/home/$WORKER_USER
+Environment=HOME=/home/$WORKER_USER
+Environment=PATH=/home/$WORKER_USER/.local/bin:/home/$WORKER_USER/.cursor/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=/etc/cursor/worker.env
+ExecStart=/usr/local/bin/cursor-worker-run
+# The CLI exits 0 when the idle release timeout fires; restarting gives the next
+# session a freshly prepared workspace.
+Restart=always
+RestartSec=5
+TimeoutStopSec=120
+LimitNOFILE=65536
+SyslogIdentifier=cursor-worker
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_EOF
+
+%{ if extra_setup_script != "" ~}
+echo "--- Running the extra setup script"
+${extra_setup_script}
+%{ endif ~}
+
+echo "--- Preparing the workspace"
+sudo -u "$WORKER_USER" -H /usr/local/bin/cursor-worker-prepare ||
+  echo "WARNING initial workspace preparation failed; the service will retry"
+
+echo "--- Starting the worker"
+systemctl daemon-reload
+systemctl enable cursor-worker.service
+systemctl restart cursor-worker.service
+
+echo "=== Cursor worker bootstrap complete at $(date -Is) ==="

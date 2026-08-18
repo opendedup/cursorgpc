@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Prepare the workspace roots a Cursor worker serves.
+#
+# Runs as the worker user before every worker start, so each agent session gets
+# an up-to-date checkout. Repository failures are logged and skipped rather than
+# fatal: the worker should still come up and be reachable for debugging.
+set -uo pipefail
+
+CONFIG_FILE="${CURSOR_WORKER_CONFIG_FILE:-/etc/cursor/worker.env}"
+if [[ -r "$CONFIG_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$CONFIG_FILE"
+  set +a
+fi
+
+WORKSPACE_ROOT="${CURSOR_WORKER_WORKSPACE_ROOT:-${HOME}/workspace}"
+REPOS_FILE="${CURSOR_WORKER_REPOS_FILE:-/etc/cursor/repos.json}"
+RESET_MODE="${CURSOR_WORKER_RESET_MODE:-reset}"
+
+log() { echo "cursor-worker-prepare: $*"; }
+
+mkdir -p "$WORKSPACE_ROOT"
+
+# Long-lived hosts accumulate repos owned by different UIDs after image or user
+# changes; this keeps git usable without per-directory allowlisting.
+git config --global --replace-all safe.directory '*'
+git config --global advice.detachedHead false
+
+if [[ -n "${CURSOR_GIT_CREDENTIALS_SECRET_ID:-}" ]]; then
+  if credentials="$(cursor-worker-secret "$CURSOR_GIT_CREDENTIALS_SECRET_ID")"; then
+    umask 077
+    printf '%s\n' "$credentials" >"${HOME}/.git-credentials"
+    chmod 0600 "${HOME}/.git-credentials"
+    git config --global credential.helper store
+    log "installed git credentials from secret ${CURSOR_GIT_CREDENTIALS_SECRET_ID}"
+  else
+    log "WARNING could not read git credentials secret ${CURSOR_GIT_CREDENTIALS_SECRET_ID}; private clones will fail"
+  fi
+fi
+
+if [[ ! -r "$REPOS_FILE" ]]; then
+  log "no repo manifest at ${REPOS_FILE}; leaving the workspace as is"
+  exit 0
+fi
+
+if [[ "$(jq 'length' "$REPOS_FILE")" -eq 0 ]]; then
+  # Repo-less pool: the agent or repo hooks manage cloning.
+  mkdir -p "${WORKSPACE_ROOT}/default"
+  log "repo-less pool, using ${WORKSPACE_ROOT}/default"
+  exit 0
+fi
+
+default_branch() {
+  local dir="$1" branch
+
+  branch="$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"
+  if [[ -n "$branch" ]]; then
+    printf '%s' "${branch#origin/}"
+    return 0
+  fi
+
+  git -C "$dir" remote set-head origin --auto >/dev/null 2>&1
+  branch="$(git -C "$dir" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)"
+  if [[ -n "$branch" ]]; then
+    printf '%s' "${branch#origin/}"
+    return 0
+  fi
+
+  git -C "$dir" rev-parse --abbrev-ref HEAD
+}
+
+while IFS=$'\t' read -r url name branch; do
+  [[ -n "$url" && -n "$name" ]] || continue
+
+  dir="${WORKSPACE_ROOT}/${name}"
+  mkdir -p "$dir"
+
+  if [[ ! -d "${dir}/.git" ]]; then
+    log "cloning ${url} into ${dir}"
+    if [[ -n "$branch" ]]; then
+      git clone --branch "$branch" "$url" "$dir" || log "WARNING clone of ${url} failed"
+    else
+      git clone "$url" "$dir" || log "WARNING clone of ${url} failed"
+    fi
+    continue
+  fi
+
+  if [[ "$RESET_MODE" == "none" ]]; then
+    log "skipping refresh of ${dir} (reset mode: none)"
+    continue
+  fi
+
+  log "refreshing ${dir}"
+  if ! git -C "$dir" fetch --prune --tags origin; then
+    log "WARNING fetch failed for ${dir}; using the existing checkout"
+    continue
+  fi
+
+  target="$branch"
+  [[ -n "$target" ]] || target="$(default_branch "$dir")"
+
+  git -C "$dir" checkout --force "$target" || log "WARNING checkout of ${target} failed in ${dir}"
+  git -C "$dir" reset --hard "origin/${target}" || log "WARNING reset to origin/${target} failed in ${dir}"
+
+  if [[ "$RESET_MODE" == "clean" ]]; then
+    git -C "$dir" clean -ffdx || log "WARNING clean failed in ${dir}"
+  fi
+done < <(jq -r '.[] | [.url, .name, (.branch // "")] | @tsv' "$REPOS_FILE")
+
+log "workspace ready under ${WORKSPACE_ROOT}"
