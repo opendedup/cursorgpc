@@ -80,6 +80,8 @@ make bootstrap-log   # apt, Docker, CLI install, repo clone
 make follow          # tail cursor-worker.service
 ```
 
+Prefer to do it by hand, or already have a machine with the CLI installed? [`docs/manual-setup.md`](docs/manual-setup.md) is the same deployment as a `gcloud` runbook, including the one-line My Machines variant for a single personal worker.
+
 A connected worker logs its registered roots, which is the source of truth for what Cursor sees:
 
 ```text
@@ -238,6 +240,7 @@ terraform/
   files/cursor-worker-prepare     Clones and refreshes the workspace roots
   files/cursor-worker-run         systemd entrypoint that execs the worker CLI
 scripts/                          Operator helpers used by the Makefile
+docs/manual-setup.md              The same worker built by hand with gcloud
 ```
 
 ## References
