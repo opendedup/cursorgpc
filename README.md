@@ -152,11 +152,32 @@ Full reference in [`terraform/variables.tf`](terraform/variables.tf). The variab
 | `worker_idle_release_timeout` | `600` | Seconds to hold the worker after a session, for follow-ups |
 | `worker_reset_mode` | `reset` | `reset` keeps build caches, `clean` wipes untracked files, `none` leaves the checkout |
 | `install_docker` | `true` | Docker Engine for the agent's builds |
+| `install_desktop` | `false` | Xvfb, a window manager, Chrome, and loopback VNC for browser and GUI work |
 | `extra_apt_packages` / `extra_setup_script` | `[]` / `""` | Language toolchains and other repo-specific setup |
 | `use_spot` | `false` | Spot VMs; cheaper, but preemption kills in-flight sessions |
 | `restrict_egress` | `true` | Deny-all egress plus allow rules for HTTPS, HTTP, and DNS |
 
 Sizing is a judgment call: Cursor publishes no worker spec and recommends sizing a worker like a CI runner or devbox for the repo it serves. `e2-standard-16` is generous for most repos; if agents mostly edit and run small test suites, `e2-standard-8` halves the bill.
+
+### Browser and desktop access
+
+Cursor's managed agent VMs ship a full desktop: agents drive a mouse, keyboard, and browser, and you can [take over the remote desktop](https://cursor.com/docs/cloud-agent/capabilities.md#remote-desktop-control) from the dashboard. A self-hosted worker is a different situation, and the distinction matters:
+
+- **What the docs state.** A worker executes "terminal commands, file edits, browser actions, and other tool calls", and artifact behavior — screenshots and videos — is identical to managed agents.
+- **What the docs do not state.** There is no documented display requirement for a worker, no documented package list for browser work, and no documented equivalent of dashboard remote-desktop takeover for self-hosted workers. The pool prerequisites list only the CLI, `git`, a workspace directory, and access to your tools.
+- **What follows from that.** The stock GCE image is headless, so nothing GUI-related can work until you install a display and a browser. Whether Cursor's computer-use tooling then drives it end to end on a self-hosted worker is not something the docs promise; verify it against your own workload, or ask Cursor.
+
+`install_desktop = true` gives the worker what GUI work needs regardless: Xvfb on `:99`, a minimal window manager, Google Chrome, and a VNC server bound to loopback. `DISPLAY=:99` is set for the worker process, so anything the agent launches — Playwright, Puppeteer, a plain `google-chrome` invocation — finds a display.
+
+That flag also gives *you* a way in, which is the part that does not depend on any Cursor feature:
+
+```bash
+make vnc     # tunnels the worker's display to localhost:5900 over IAP
+```
+
+Then point a VNC client at `localhost:5900` to watch or drive the same display the agent uses. The VNC server has no password because it listens on loopback only and the tunnel is gated by IAP plus IAM, so getting a port is equivalent to already having a shell on the VM. If you would rather expose it differently, change `x11vnc.service` in the bootstrap and add auth.
+
+`make ssh` is the other half of this: the worker is a normal VM, so `tmux`, `htop`, and reading `~/workspace` are all available whether or not you install a desktop.
 
 ### Toolchains
 

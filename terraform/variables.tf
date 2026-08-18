@@ -286,6 +286,12 @@ variable "install_docker" {
   default     = true
 }
 
+variable "install_desktop" {
+  description = "Install a virtual display (Xvfb on :99), a minimal window manager, Google Chrome, and a loopback-only VNC server. Needed for any browser or GUI work on the worker, since the base image is headless. Also lets an operator view the display over an SSH tunnel."
+  type        = bool
+  default     = false
+}
+
 variable "install_ops_agent" {
   description = "Install the Google Cloud Ops Agent so worker logs and host metrics reach Cloud Logging and Cloud Monitoring."
   type        = bool

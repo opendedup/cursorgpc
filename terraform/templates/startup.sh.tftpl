@@ -71,6 +71,32 @@ fi
 systemctl enable --now docker
 %{ endif ~}
 
+%{ if install_desktop ~}
+echo "--- Installing the virtual display, window manager, and browser"
+apt_retry install -y --no-install-recommends \
+  dbus-x11 \
+  fluxbox \
+  fonts-liberation \
+  x11-utils \
+  x11vnc \
+  xvfb
+
+if [ "$(dpkg --print-architecture)" = "amd64" ]; then
+  if ! command -v google-chrome >/dev/null 2>&1; then
+    install -m 0755 -d /etc/apt/keyrings
+    retry curl -fsSL -o /tmp/google-chrome.pub https://dl.google.com/linux/linux_signing_key.pub
+    gpg --batch --yes --dearmor -o /etc/apt/keyrings/google-chrome.gpg /tmp/google-chrome.pub
+    rm -f /tmp/google-chrome.pub
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+      >/etc/apt/sources.list.d/google-chrome.list
+    apt_retry update
+    apt_retry install -y google-chrome-stable
+  fi
+else
+  echo "WARNING skipping Google Chrome: no stable arm64 build. Install a browser in extra_setup_script."
+fi
+%{ endif ~}
+
 echo "--- Creating worker user $WORKER_USER"
 if ! id -u "$WORKER_USER" >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash "$WORKER_USER"
@@ -150,13 +176,71 @@ OPS_AGENT_EOF
 systemctl restart google-cloud-ops-agent || echo "WARNING could not restart the Ops Agent"
 %{ endif ~}
 
+%{ if install_desktop ~}
+echo "--- Installing display services"
+cat >/etc/systemd/system/xvfb.service <<'XVFB_EOF'
+[Unit]
+Description=X virtual framebuffer on :99
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+XVFB_EOF
+
+cat >/etc/systemd/system/fluxbox.service <<FLUXBOX_EOF
+[Unit]
+Description=Window manager on the virtual display
+Requires=xvfb.service
+After=xvfb.service
+
+[Service]
+Type=simple
+User=$WORKER_USER
+Environment=DISPLAY=:99
+ExecStart=/usr/bin/fluxbox
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+FLUXBOX_EOF
+
+# Bound to loopback with no password: reachable only by someone who can already
+# get a shell on the VM, which is gated by IAP and IAM. Reach it with
+# `gcloud compute ssh --tunnel-through-iap -- -L 5900:localhost:5900`.
+cat >/etc/systemd/system/x11vnc.service <<'X11VNC_EOF'
+[Unit]
+Description=Loopback VNC view of the virtual display
+Requires=xvfb.service
+After=xvfb.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/x11vnc -display :99 -localhost -rfbport 5900 -shared -forever -nopw -quiet
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+X11VNC_EOF
+
+systemctl daemon-reload
+systemctl enable --now xvfb.service fluxbox.service x11vnc.service
+%{ endif ~}
+
 echo "--- Installing the cursor-worker service"
 cat >/etc/systemd/system/cursor-worker.service <<SERVICE_EOF
 [Unit]
 Description=Cursor self-hosted Cloud Agent worker
 Documentation=https://cursor.com/docs/cloud-agent/self-hosted-guides/pool
 Wants=network-online.target
-After=network-online.target docker.service
+After=network-online.target docker.service xvfb.service
 
 [Service]
 Type=simple

@@ -46,6 +46,8 @@ locals {
       CURSOR_WORKER_WORKSPACE_ROOT       = local.workspace_root
       CURSOR_WORKER_VERBOSE              = var.worker_verbose ? "1" : "0"
     },
+    # Browser and GUI tools need a display to attach to.
+    var.install_desktop ? { DISPLAY = ":99" } : {},
     var.worker_env,
   )
 
@@ -53,6 +55,7 @@ locals {
     worker_user               = var.worker_user
     workspace_root            = local.workspace_root
     install_docker            = var.install_docker
+    install_desktop           = var.install_desktop
     install_ops_agent         = var.install_ops_agent
     enable_prometheus_metrics = var.enable_prometheus_metrics && var.install_ops_agent
     management_port           = var.management_port

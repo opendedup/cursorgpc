@@ -71,6 +71,10 @@ bootstrap-log: ## Show the bootstrap log of one worker
 ssh: ## SSH into a worker over IAP
 	scripts/ssh.sh
 
+.PHONY: vnc
+vnc: ## Tunnel a worker's virtual display to localhost:5900 (needs install_desktop)
+	scripts/vnc.sh
+
 .PHONY: restart
 restart: ## Restart the worker service on every instance
 	scripts/restart-workers.sh --soft

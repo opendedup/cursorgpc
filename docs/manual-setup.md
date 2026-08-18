@@ -280,6 +280,44 @@ assignment identity and dashboard display. Add `--label key=value` (or
 `--labels-file`) for routing labels, but not `repo` or `pool`, which Cursor sets
 itself.
 
+## Optional: a display for browser work
+
+The stock image is headless, so a browser has nothing to draw on. If your agents
+need browser or GUI tool calls, or you want to watch what they do:
+
+```bash
+sudo apt-get install -y xvfb fluxbox x11vnc x11-utils dbus-x11 fonts-liberation
+
+curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+  | sudo tee /etc/apt/sources.list.d/google-chrome.list
+sudo apt-get update && sudo apt-get install -y google-chrome-stable
+```
+
+Run the display, a window manager, and a loopback-only VNC server:
+
+```bash
+Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp &
+DISPLAY=:99 fluxbox &
+x11vnc -display :99 -localhost -rfbport 5900 -shared -forever -nopw &
+export DISPLAY=:99
+```
+
+Restart the worker so it inherits `DISPLAY`. To look at that display from your
+laptop, forward the port over IAP and point a VNC client at `localhost:5900`:
+
+```bash
+gcloud compute ssh cursor-worker-1 --zone="$ZONE" --tunnel-through-iap \
+  -- -N -L 5900:localhost:5900
+```
+
+In Terraform this is `install_desktop = true`, which also installs the three
+services as systemd units so they survive a reboot. Note that this gets a browser
+and a viewable desktop onto the worker; whether Cursor's computer-use tooling
+drives it end to end on a self-hosted worker is not something the docs state
+either way.
+
 ## 6. Keep it running
 
 `agent worker ... start` in an SSH session dies with the session, and it exits 0
