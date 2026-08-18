@@ -27,15 +27,30 @@ mkdir -p "$WORKSPACE_ROOT"
 git config --global --replace-all safe.directory '*'
 git config --global advice.detachedHead false
 
+install_git_credentials() {
+  local credentials="$1" source="$2"
+
+  umask 077
+  printf '%s\n' "$credentials" >"${HOME}/.git-credentials"
+  chmod 0600 "${HOME}/.git-credentials"
+  git config --global credential.helper store
+  log "installed git credentials from ${source}"
+}
+
 if [[ -n "${CURSOR_GIT_CREDENTIALS_SECRET_ID:-}" ]]; then
   if credentials="$(cursor-worker-secret "$CURSOR_GIT_CREDENTIALS_SECRET_ID")"; then
-    umask 077
-    printf '%s\n' "$credentials" >"${HOME}/.git-credentials"
-    chmod 0600 "${HOME}/.git-credentials"
-    git config --global credential.helper store
-    log "installed git credentials from secret ${CURSOR_GIT_CREDENTIALS_SECRET_ID}"
+    install_git_credentials "$credentials" "secret ${CURSOR_GIT_CREDENTIALS_SECRET_ID}"
   else
     log "WARNING could not read git credentials secret ${CURSOR_GIT_CREDENTIALS_SECRET_ID}; private clones will fail"
+  fi
+elif [[ -n "${CURSOR_GITHUB_TOKEN_SECRET_ID:-}" ]]; then
+  # A GitHub token can serve both git and gh, so derive the credential line
+  # rather than making the operator maintain a second secret.
+  if token="$(cursor-worker-secret "$CURSOR_GITHUB_TOKEN_SECRET_ID")"; then
+    install_git_credentials "https://x-access-token:${token}@github.com" \
+      "GitHub token secret ${CURSOR_GITHUB_TOKEN_SECRET_ID}"
+  else
+    log "WARNING could not read GitHub token secret ${CURSOR_GITHUB_TOKEN_SECRET_ID}; private clones will fail"
   fi
 fi
 

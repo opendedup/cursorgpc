@@ -286,6 +286,30 @@ variable "install_docker" {
   default     = true
 }
 
+variable "install_github_cli" {
+  description = "Install the GitHub CLI (gh) from GitHub's apt repository."
+  type        = bool
+  default     = true
+}
+
+variable "install_poetry" {
+  description = "Install Poetry for the worker user with the official installer, landing on the worker's PATH."
+  type        = bool
+  default     = true
+}
+
+variable "poetry_version" {
+  description = "Poetry version to install, for example \"2.1.3\". Empty installs the latest release; pin it for reproducible builds."
+  type        = string
+  default     = ""
+}
+
+variable "github_token_secret_id" {
+  description = "Optional Secret Manager secret holding a GitHub token. Exported to the worker as GH_TOKEN and GITHUB_TOKEN so gh works non-interactively, and used for HTTPS git clones when git_credentials_secret_id is unset."
+  type        = string
+  default     = ""
+}
+
 variable "install_desktop" {
   description = "Install a virtual display (Xvfb on :99), a minimal window manager, Google Chrome, and a loopback-only VNC server. Needed for any browser or GUI work on the worker, since the base image is headless. Also lets an operator view the display over an SSH tunnel."
   type        = bool

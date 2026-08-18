@@ -204,8 +204,44 @@ needs `git` on `PATH`:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git curl jq build-essential python3 tmux unzip
+sudo apt-get install -y git curl jq build-essential python3 python3-venv tmux unzip
 ```
+
+The GitHub CLI comes from GitHub's own apt repository:
+
+```bash
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+  https://cli.github.com/packages/githubcli-archive-keyring.gpg
+sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+  | sudo tee /etc/apt/sources.list.d/github-cli.list
+sudo apt-get update && sudo apt-get install -y gh
+```
+
+Poetry installs per user, onto the same `~/.local/bin` the CLI uses. `python3-venv`
+above is what its installer needs:
+
+```bash
+curl -sSL https://install.python-poetry.org | python3 -
+poetry --version
+```
+
+`gh` is unauthenticated until you give it a token. For an interactive box
+`gh auth login` is fine; for an unattended worker export `GH_TOKEN` from Secret
+Manager the same way the API key is read, which also lets the same token serve
+HTTPS git clones:
+
+```bash
+export GH_TOKEN=$(gcloud secrets versions access latest --secret=cursor-worker-github-token)
+export GITHUB_TOKEN="$GH_TOKEN"
+git config --global credential.helper store
+printf 'https://x-access-token:%s@github.com\n' "$GH_TOKEN" > ~/.git-credentials
+chmod 600 ~/.git-credentials
+```
+
+In Terraform this is `install_github_cli`, `install_poetry`, and
+`github_token_secret_id`.
 
 Docker is optional and only for the agent's own builds. If you add it, remember
 that the `docker` group is root-equivalent on the host:

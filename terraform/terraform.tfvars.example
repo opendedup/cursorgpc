@@ -28,9 +28,19 @@ worker_labels = {
   env      = "production"
 }
 
-# Secret holding a GitHub token line such as
-# `https://x-access-token:ghp_xxx@github.com`. Required for private repos.
+# Secret holding a GitHub token. Exported to the worker as GH_TOKEN and
+# GITHUB_TOKEN so `gh` is authenticated, and reused as the HTTPS git credential
+# for private clones. Recommended over git_credentials_secret_id: one secret,
+# both uses.
+# github_token_secret_id = "cursor-worker-github-token"
+
+# Alternative to the above when you want to supply the raw credential line, such
+# as `https://x-access-token:ghp_xxx@github.com`. Takes precedence over
+# github_token_secret_id for git, which then only authenticates `gh`.
 # git_credentials_secret_id = "cursor-worker-git-credentials"
+
+# Pin Poetry for reproducible builds. Empty installs the latest release.
+# poetry_version = "2.1.3"
 
 # Pin zones if the machine type is not offered in every zone of the region.
 # zones = ["us-central1-a", "us-central1-b", "us-central1-c"]

@@ -35,6 +35,7 @@ locals {
       CURSOR_GCP_PROJECT_ID              = var.project_id
       CURSOR_API_KEY_SECRET_ID           = var.cursor_api_key_secret_id
       CURSOR_GIT_CREDENTIALS_SECRET_ID   = var.git_credentials_secret_id
+      CURSOR_GITHUB_TOKEN_SECRET_ID      = var.github_token_secret_id
       CURSOR_WORKER_MODE                 = var.worker_mode
       CURSOR_WORKER_NAME                 = var.worker_name
       CURSOR_WORKER_POOL_NAME            = var.worker_pool_name
@@ -56,6 +57,9 @@ locals {
     workspace_root            = local.workspace_root
     install_docker            = var.install_docker
     install_desktop           = var.install_desktop
+    install_github_cli        = var.install_github_cli
+    install_poetry            = var.install_poetry
+    poetry_version            = var.poetry_version
     install_ops_agent         = var.install_ops_agent
     enable_prometheus_metrics = var.enable_prometheus_metrics && var.install_ops_agent
     management_port           = var.management_port

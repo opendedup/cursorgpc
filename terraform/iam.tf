@@ -45,6 +45,15 @@ resource "google_secret_manager_secret_iam_member" "git_credentials" {
   member    = "serviceAccount:${google_service_account.worker.email}"
 }
 
+resource "google_secret_manager_secret_iam_member" "github_token" {
+  count = var.github_token_secret_id != "" ? 1 : 0
+
+  project   = var.project_id
+  secret_id = var.github_token_secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.worker.email}"
+}
+
 # Optional operator access: IAP tunnelling plus OS Login on the workers.
 resource "google_project_iam_member" "iap_tunnel" {
   for_each = toset(var.iap_ssh_members)

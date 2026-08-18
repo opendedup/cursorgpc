@@ -51,9 +51,25 @@ apt_retry install -y --no-install-recommends \
   less \
   openssh-client \
   python3 \
+  python3-venv \
   rsync \
   tmux \
   unzip ${extra_apt_packages}
+
+%{ if install_github_cli ~}
+echo "--- Installing the GitHub CLI"
+if ! command -v gh >/dev/null 2>&1; then
+  install -m 0755 -d /etc/apt/keyrings
+  retry curl -fsSL -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    https://cli.github.com/packages/githubcli-archive-keyring.gpg
+  chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    >/etc/apt/sources.list.d/github-cli.list
+  apt_retry update
+  apt_retry install -y gh
+fi
+gh --version || echo "WARNING could not report the gh version"
+%{ endif ~}
 
 %{ if install_docker ~}
 echo "--- Installing Docker Engine"
@@ -143,6 +159,22 @@ fi
 sudo -u "$WORKER_USER" -H bash -lc \
   'PATH="$HOME/.local/bin:$HOME/.cursor/bin:$PATH"; agent --version' ||
   echo "WARNING could not report the Cursor CLI version"
+
+%{ if install_poetry ~}
+echo "--- Installing Poetry for $WORKER_USER"
+if ! sudo -u "$WORKER_USER" -H test -x "/home/$WORKER_USER/.local/bin/poetry"; then
+%{ if poetry_version != "" ~}
+  retry sudo -u "$WORKER_USER" -H POETRY_VERSION="${poetry_version}" \
+    bash -lc 'curl -sSL https://install.python-poetry.org | python3 -'
+%{ else ~}
+  retry sudo -u "$WORKER_USER" -H \
+    bash -lc 'curl -sSL https://install.python-poetry.org | python3 -'
+%{ endif ~}
+fi
+sudo -u "$WORKER_USER" -H bash -lc \
+  'PATH="$HOME/.local/bin:$PATH"; poetry --version' ||
+  echo "WARNING could not report the Poetry version"
+%{ endif ~}
 
 %{ if install_ops_agent ~}
 echo "--- Installing the Google Cloud Ops Agent"

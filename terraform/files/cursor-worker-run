@@ -61,6 +61,16 @@ if ! CURSOR_API_KEY="$(cursor-worker-secret "$CURSOR_API_KEY_SECRET_ID")"; then
 fi
 export CURSOR_API_KEY
 
+# gh reads GH_TOKEN, and many tools still expect GITHUB_TOKEN.
+if [[ -n "${CURSOR_GITHUB_TOKEN_SECRET_ID:-}" ]]; then
+  if GH_TOKEN="$(cursor-worker-secret "$CURSOR_GITHUB_TOKEN_SECRET_ID")"; then
+    GITHUB_TOKEN="$GH_TOKEN"
+    export GH_TOKEN GITHUB_TOKEN
+  else
+    log "WARNING could not read GitHub token secret ${CURSOR_GITHUB_TOKEN_SECRET_ID}; gh will be unauthenticated"
+  fi
+fi
+
 worker_dirs=()
 if [[ -r "$REPOS_FILE" ]] && [[ "$(jq 'length' "$REPOS_FILE")" -gt 0 ]]; then
   while IFS= read -r name; do

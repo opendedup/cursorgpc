@@ -152,6 +152,8 @@ Full reference in [`terraform/variables.tf`](terraform/variables.tf). The variab
 | `worker_idle_release_timeout` | `600` | Seconds to hold the worker after a session, for follow-ups |
 | `worker_reset_mode` | `reset` | `reset` keeps build caches, `clean` wipes untracked files, `none` leaves the checkout |
 | `install_docker` | `true` | Docker Engine for the agent's builds |
+| `install_github_cli` / `install_poetry` | `true` | `gh` from GitHub's apt repo; Poetry on the worker's `PATH` |
+| `github_token_secret_id` | `""` | Secret with a GitHub token, exported as `GH_TOKEN` and reused for private clones |
 | `install_desktop` | `false` | Xvfb, a window manager, Chrome, and loopback VNC for browser and GUI work |
 | `extra_apt_packages` / `extra_setup_script` | `[]` / `""` | Language toolchains and other repo-specific setup |
 | `use_spot` | `false` | Spot VMs; cheaper, but preemption kills in-flight sessions |
@@ -181,7 +183,22 @@ Then point a VNC client at `localhost:5900` to watch or drive the same display t
 
 ### Toolchains
 
-The bootstrap installs git, curl, jq, Python 3, build-essential, tmux, and Docker. Anything else your builds need belongs in `extra_apt_packages` or `extra_setup_script`, which runs as root at the end of the bootstrap and must be idempotent:
+The bootstrap installs git, the GitHub CLI (`gh`), Poetry, curl, jq, Python 3 with `venv`, build-essential, tmux, and Docker. `gh` comes from GitHub's apt repository and Poetry from its official installer, which puts it on the worker's `PATH` at `~/.local/bin/poetry`. Pin it with `poetry_version` if reproducible builds matter more than staying current; both are toggled by `install_github_cli` and `install_poetry`.
+
+`gh` needs a token to do anything beyond `--version`. Put one in Secret Manager and point `github_token_secret_id` at it:
+
+```bash
+gcloud secrets create cursor-worker-github-token --project=lennyisagoodboy --replication-policy=automatic
+printf %s "$GH_TOKEN" | gcloud secrets versions add cursor-worker-github-token --project=lennyisagoodboy --data-file=-
+```
+
+```hcl
+github_token_secret_id = "cursor-worker-github-token"
+```
+
+The worker exports it as `GH_TOKEN` and `GITHUB_TOKEN` at each start, and derives the HTTPS git credential from the same token when `git_credentials_secret_id` is unset — so one secret covers both `gh` and private clones. Like the Cursor key, it is read at startup and never written to disk.
+
+Anything else your builds need belongs in `extra_apt_packages` or `extra_setup_script`, which runs as root at the end of the bootstrap and must be idempotent:
 
 ```hcl
 extra_setup_script = <<-EOT
