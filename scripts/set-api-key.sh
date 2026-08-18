@@ -23,10 +23,33 @@ fi
 
 [[ -n "$CURSOR_API_KEY" ]] || die "no API key provided"
 
-case "$CURSOR_API_KEY" in
-key_*) ;;
-*) echo "warning: the key does not start with 'key_'; pool workers reject user, personal, team, and organization keys" >&2 ;;
-esac
+if [[ "$CURSOR_API_KEY" =~ [[:space:]] ]]; then
+  die "the key contains whitespace; it was probably copied with a trailing newline"
+fi
+
+# Only service account keys can manage pool worker capacity, so a successful
+# fleet-management call is a reliable way to reject the wrong key type before it
+# reaches the workers, where the failure is much harder to read.
+if [[ "${SKIP_VERIFY:-0}" != "1" ]] && command -v curl >/dev/null 2>&1; then
+  status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+    --url "https://api.cursor.com/v0/private-workers/summary" \
+    -u "${CURSOR_API_KEY}:" || echo 000)"
+
+  case "$status" in
+  200)
+    echo "Verified: the key can manage pool worker capacity."
+    ;;
+  401 | 403)
+    die "Cursor rejected the key for pool fleet management (HTTP ${status}). Pool workers need a service account key from Dashboard > Settings > API Keys > Service Accounts; user, personal, team, and organization keys are rejected. Set SKIP_VERIFY=1 to store it anyway."
+    ;;
+  000)
+    echo "warning: could not reach api.cursor.com to verify the key; storing it unverified" >&2
+    ;;
+  *)
+    echo "warning: unexpected HTTP ${status} while verifying the key; storing it anyway" >&2
+    ;;
+  esac
+fi
 
 if ! gcloud secrets describe "$SECRET" --project="$PROJECT" >/dev/null 2>&1; then
   die "secret ${SECRET} does not exist in ${PROJECT}; run terraform apply first"

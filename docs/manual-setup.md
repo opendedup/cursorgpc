@@ -39,6 +39,26 @@ Service Accounts; it is shown once. Also turn on **Allow Self-Hosted Agents** (o
 To turn a machine you already have into a pool worker, skip ahead to
 [Run the worker](#5-run-the-worker).
 
+## Which key do I have?
+
+There is no documented prefix that distinguishes a user API key from a service
+account key, so check what the key can do instead. Fleet management is service
+account only, which makes it a reliable probe:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -u "$CURSOR_API_KEY:" \
+  https://api.cursor.com/v0/private-workers/summary
+```
+
+`200` means the key works for pool workers. `401` or `403` means it is a user,
+personal, team, or organization key: fine for `agent login` / My Machines and for
+`agent -p` in CI, but pool workers will reject it. `scripts/set-api-key.sh` runs
+this check before storing anything.
+
+Wherever the key ends up, keep it out of shell history and out of git. Use
+`read -r -s` to enter it, or pipe it straight from a secret store.
+
 ## 1. Enable APIs
 
 ```bash
